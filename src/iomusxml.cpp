@@ -2874,9 +2874,12 @@ void MusicXmlInput::ReadMusicXmlHarmony(pugi::xml_node node, Measure *measure)
 
     int durOffset = 0;
 
-    std::string harmText = GetContentOfChild(node, "root/root-step");
+    // root-step@text, when present, replaces the step in the displayed text. An empty value hides the root,
+    // which is how the "none" kind (no chord) is expected to be encoded.
+    pugi::xml_node rootStep = node.child("root").child("root-step");
+    std::string harmText = rootStep.attribute("text") ? rootStep.attribute("text").as_string() : GetContent(rootStep);
     pugi::xpath_node alter = node.select_node("root/root-alter");
-    if (harmText.empty()) {
+    if (!rootStep) {
         pugi::xml_node numeral = node.select_node("numeral/numeral-root").node();
         harmText = numeral.attribute("text") ? numeral.attribute("text").as_string() : numeral.text().as_string();
         alter = node.select_node("numeral/numeral-alter");
@@ -2887,7 +2890,7 @@ void MusicXmlInput::ReadMusicXmlHarmony(pugi::xml_node node, Measure *measure)
         if (HasAttributeWithValue(kind, "use-symbols", "yes")) {
             harmText = harmText + ConvertKindToSymbol(GetContent(kind));
         }
-        else if (kind.attribute("text") && std::strcmp(kind.text().as_string(), "none")) {
+        else if (kind.attribute("text")) {
             harmText = harmText + kind.attribute("text").as_string();
         }
         else {
@@ -3176,7 +3179,10 @@ void MusicXmlInput::ReadMusicXmlNote(
             const float alterVal = pitch.child("alter").text().as_float();
             const int octaveNum = pitch.child("octave").text().as_int();
             if (!stepStr.empty()) note->SetPname(ConvertStepToPitchName(stepStr));
-            if (m_octDis[notationStaffN] != 0) {
+            // The written octave follows the octave shift of the staff the note is drawn on. The sounding octave
+            // is also made explicit when the staff of the layer is shifted, since a cross-staff note is not
+            // affected by it.
+            if ((m_octDis[notationStaffN] != 0) || (m_octDis[staff->GetN()] != 0)) {
                 note->SetOct(octaveNum - m_octDis[notationStaffN]);
                 note->SetOctGes(octaveNum);
             }
@@ -4263,8 +4269,10 @@ void MusicXmlInput::ReadMusicXmlSound(pugi::xml_node node, Measure *measure, Sec
         m_fineInfo = musicxml::FineInfo(true);
     }
 
+    // A tempo within a direction is already handled by ReadMusicXmlDirection
+    const bool inDirection = IsElement(node.parent(), "direction");
     const float bpm = node.attribute("tempo").as_float();
-    if (bpm > 0) {
+    if (bpm > 0 && !inDirection) {
         const short int offset = node.child("offset").text().as_int();
         const double timeStamp = (double)(m_durTotal + offset) * (double)m_meterUnit / (double)(4 * m_ppq) + 1.0;
         Tempo *tempo = new Tempo();
